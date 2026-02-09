@@ -3,8 +3,8 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # Supabase
-    supabase_url: str = ""
-    supabase_service_key: str = ""
+    supabase_url: str = "https://cbuxjtokckskquxwvmod.supabase.co"
+    supabase_service_key: str = "sb_publishable_tbcNoaaOX95xc0Zuv2zI2w_OaBoK2GA"
     database_url: str = ""
 
     # OpenAI
