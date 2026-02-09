@@ -11,7 +11,7 @@ This API handles:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
-from app.routers import conversations, search, embeddings
+from app.routers import conversations, search
 
 app = FastAPI(
     title="Breadcrumps API",
@@ -35,7 +35,6 @@ app.add_middleware(
 # Routes
 app.include_router(conversations.router, prefix="/api/conversations", tags=["conversations"])
 app.include_router(search.router, prefix="/api/search", tags=["search"])
-app.include_router(embeddings.router, prefix="/api/embeddings", tags=["embeddings"])
 
 
 @app.get("/health")

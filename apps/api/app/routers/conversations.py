@@ -4,8 +4,9 @@ Conversation import and processing routes.
 
 from fastapi import APIRouter, HTTPException
 from app.models.schemas import ConversationImport, ConversationResponse
-from app.services.embedding_service import generate_embeddings
 from app.services.supabase_service import get_supabase
+from app.services.chunking_service import create_chunks
+from app.services.embedding_service import generate_embeddings
 
 router = APIRouter()
 
@@ -15,9 +16,10 @@ async def import_conversation(payload: ConversationImport):
     """
     Import a conversation (from extension scrape or manual paste).
     
+    Pipeline:
     1. Store conversation + messages in Supabase
-    2. Generate embeddings for each message
-    3. Store embeddings in pgvector
+    2. Create chunks from messages
+    3. Generate embeddings for chunks
     """
     supabase = get_supabase()
 
@@ -27,6 +29,7 @@ async def import_conversation(payload: ConversationImport):
             "title": payload.title,
             "source": payload.source.value,
             "source_url": payload.source_url,
+            "user_id": payload.user_id,
             "project_id": payload.project_id,
             "metadata": payload.metadata or {},
         }
@@ -47,12 +50,23 @@ async def import_conversation(payload: ConversationImport):
         ]
 
         msg_result = supabase.table("messages").insert(messages_data).execute()
+        
+        # Prepare messages with IDs for chunking
+        messages_with_ids = [
+            {
+                "id": msg_result.data[i]["id"],
+                "role": messages_data[i]["role"],
+                "content": messages_data[i]["content"],
+                "position": messages_data[i]["position"],
+            }
+            for i in range(len(messages_data))
+        ]
 
-        # 3. Generate and store embeddings (async in production, sync for MVP)
-        message_ids = [m["id"] for m in msg_result.data]
-        contents = [msg.content for msg in payload.messages]
+        # 3. Create chunks from messages
+        chunks = await create_chunks(conversation_id, messages_with_ids)
 
-        await generate_embeddings(message_ids, contents, conversation_id)
+        # 4. Generate embeddings for chunks
+        await generate_embeddings(chunks)
 
         return ConversationResponse(
             id=conversation_id,
@@ -65,3 +79,30 @@ async def import_conversation(payload: ConversationImport):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
+
+
+@router.get("/{conversation_id}")
+async def get_conversation(conversation_id: str):
+    """Get a single conversation with its messages."""
+    supabase = get_supabase()
+    
+    try:
+        conv = supabase.table("conversations").select("*").eq("id", conversation_id).single().execute()
+        msgs = supabase.table("messages").select("*").eq("conversation_id", conversation_id).order("position").execute()
+        
+        return {
+            "conversation": conv.data,
+            "messages": msgs.data,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Conversation not found: {str(e)}")
+
+
+@router.get("/")
+async def list_conversations(limit: int = 20, offset: int = 0):
+    """List all conversations (paginated)."""
+    supabase = get_supabase()
+    
+    result = supabase.table("conversations").select("*").order("created_at", desc=True).range(offset, offset + limit - 1).execute()
+    
+    return {"conversations": result.data, "count": len(result.data)}

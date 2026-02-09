@@ -2,14 +2,15 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # Supabase
-    supabase_url: str = "https://cbuxjtokckskquxwvmod.supabase.co"
-    supabase_service_key: str = "sb_publishable_tbcNoaaOX95xc0Zuv2zI2w_OaBoK2GA"
+    # Supabase (set these in .env file)
+    supabase_url: str = ""
+    supabase_service_key: str = ""
     database_url: str = ""
 
-    # OpenAI
+    # OpenAI in da env yooooo
     openai_api_key: str = ""
-
+    gemini_api_key: str = ""
+    
     # App
     frontend_url: str = "http://localhost:3000"
     embedding_model: str = "text-embedding-3-small"

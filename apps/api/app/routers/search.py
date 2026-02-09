@@ -13,10 +13,11 @@ router = APIRouter()
 @router.post("/", response_model=list[SearchResultItem])
 async def semantic_search(query: SearchQuery):
     """
-    Semantic search across conversations.
+    Semantic search across conversations using chunk embeddings.
     
+    Steps:
     1. Generate embedding for the search query
-    2. Find similar messages using pgvector
+    2. Find similar chunks using pgvector (search_chunks function)
     3. Return ranked results with conversation context
     """
     try:
@@ -29,6 +30,7 @@ async def semantic_search(query: SearchQuery):
         params = {
             "query_embedding": query_embedding,
             "match_count": query.limit,
+            "similarity_threshold": 0.7,  # Minimum similarity score
         }
 
         if query.project_id:
@@ -36,15 +38,16 @@ async def semantic_search(query: SearchQuery):
         if query.source:
             params["filter_source"] = query.source.value
 
-        result = supabase.rpc("search_messages", params).execute()
+        result = supabase.rpc("search_chunks", params).execute()
 
         # 3. Format results
         return [
             SearchResultItem(
+                chunk_id=r["chunk_id"],
                 conversation_id=r["conversation_id"],
                 conversation_title=r["conversation_title"],
-                message_content=r["content"],
-                message_role=r["role"],
+                chunk_content=r["chunk_content"],
+                chunk_index=r["chunk_index"],
                 score=r["similarity"],
                 source=r["source"],
             )

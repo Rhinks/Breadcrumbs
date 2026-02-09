@@ -1,16 +1,34 @@
 """
-OpenAI embedding generation service.
+Embedding service — generates vector embeddings for chunks.
+
+TODO: ML teammate can swap OpenAI for Gemini or other providers.
 """
 
 from openai import AsyncOpenAI
 from app.config import settings
 from app.services.supabase_service import get_supabase
 
-client = AsyncOpenAI(api_key=settings.openai_api_key)
+# Initialize OpenAI client (will be None if no API key)
+_client = None
+
+
+def _get_client():
+    global _client
+    if _client is None and settings.openai_api_key:
+        _client = AsyncOpenAI(api_key=settings.openai_api_key)
+    return _client
 
 
 async def get_embedding(text: str) -> list[float]:
-    """Generate a single embedding for a text string."""
+    """
+    Generate a single embedding for text (used for search queries).
+    """
+    client = _get_client()
+    
+    if client is None:
+        # Return dummy embedding for testing without API key
+        return [0.0] * settings.embedding_dimensions
+    
     response = await client.embeddings.create(
         model=settings.embedding_model,
         input=text,
@@ -18,39 +36,36 @@ async def get_embedding(text: str) -> list[float]:
     return response.data[0].embedding
 
 
-async def generate_embeddings(
-    message_ids: list[str],
-    contents: list[str],
-    conversation_id: str,
-) -> None:
+async def generate_embeddings(chunks: list[dict]) -> None:
     """
-    Generate embeddings for a batch of messages and store in Supabase.
+    Generate embeddings for chunks and update them in the database.
     
-    Uses OpenAI's batch embedding endpoint for efficiency.
+    Args:
+        chunks: List of chunk records from database (must have 'id' and 'content')
+    
+    TODO: ML teammate can:
+    - Swap to Gemini embeddings
+    - Add batching for large conversations
+    - Add retry logic for API failures
     """
-    if not contents:
+    if not chunks:
         return
-
-    # Generate embeddings in batch (OpenAI supports up to 2048 inputs)
-    response = await client.embeddings.create(
-        model=settings.embedding_model,
-        input=contents,
-    )
-
-    # Store embeddings in the message_embeddings table
+    
+    client = _get_client()
     supabase = get_supabase()
-
-    embedding_rows = [
-        {
-            "message_id": message_ids[i],
-            "conversation_id": conversation_id,
-            "embedding": response.data[i].embedding,
-        }
-        for i in range(len(message_ids))
-    ]
-
-    # Insert in batches of 100 to avoid payload limits
-    batch_size = 100
-    for i in range(0, len(embedding_rows), batch_size):
-        batch = embedding_rows[i:i + batch_size]
-        supabase.table("message_embeddings").insert(batch).execute()
+    
+    for chunk in chunks:
+        if client is None:
+            # Dummy embedding for testing
+            embedding = [0.0] * settings.embedding_dimensions
+        else:
+            response = await client.embeddings.create(
+                model=settings.embedding_model,
+                input=chunk["content"],
+            )
+            embedding = response.data[0].embedding
+        
+        # Update the chunk with its embedding
+        supabase.table("conversation_chunks").update({
+            "embedding": embedding
+        }).eq("id", chunk["id"]).execute()

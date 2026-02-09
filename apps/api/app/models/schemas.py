@@ -8,6 +8,7 @@ class ConversationSource(str, Enum):
     chatgpt = "chatgpt"
     claude = "claude"
     gemini = "gemini"
+    perplexity = "perplexity"
     manual = "manual"
 
 
@@ -31,6 +32,7 @@ class ConversationImport(BaseModel):
     source_url: Optional[str] = None
     messages: list[MessageSchema]
     scraped_at: Optional[str] = None
+    user_id: Optional[str] = None  # TODO: Get from auth in production
     project_id: Optional[str] = None
     metadata: Optional[dict] = None
 
@@ -52,9 +54,11 @@ class SearchQuery(BaseModel):
 
 
 class SearchResultItem(BaseModel):
+    """Result from chunk-based semantic search."""
+    chunk_id: str
     conversation_id: str
     conversation_title: str
-    message_content: str
-    message_role: MessageRole
+    chunk_content: str
+    chunk_index: int
     score: float
     source: ConversationSource
