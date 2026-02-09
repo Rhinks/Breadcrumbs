@@ -1,0 +1,14 @@
+node_modules/
+.next/
+dist/
+.turbo/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+extensions/chrome/dist/

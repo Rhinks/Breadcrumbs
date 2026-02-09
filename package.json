@@ -1,0 +1,22 @@
+{
+  "name": "breadcrumps",
+  "private": true,
+  "scripts": {
+    "dev": "turbo dev",
+    "dev:web": "turbo dev --filter=@breadcrumps/web",
+    "dev:api": "cd apps/api && uvicorn app.main:app --reload --port 8000",
+    "dev:ext": "turbo dev --filter=@breadcrumps/chrome-extension",
+    "build": "turbo build",
+    "build:ext": "turbo build --filter=@breadcrumps/chrome-extension",
+    "lint": "turbo lint",
+    "clean": "turbo clean"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.0",
+    "typescript": "^5.7.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20"
+  }
+}
