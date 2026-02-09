@@ -2,7 +2,7 @@
 // Core data types shared between web app, extension, and API
 // ============================================================================
 
-export type ConversationSource = 'chatgpt' | 'claude' | 'gemini' | 'manual';
+export type ConversationSource = 'chatgpt' | 'claude' | 'gemini' | 'manual' | 'perplexity';
 export type MessageRole = 'user' | 'assistant' | 'system';
 
 export interface Message {
