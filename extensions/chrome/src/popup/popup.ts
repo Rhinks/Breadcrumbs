@@ -1,3 +1,5 @@
+import browser from 'webextension-polyfill';
+
 /**
  * Popup script — handles the extension popup UI.
  * 
@@ -14,7 +16,7 @@ const resultEl = document.getElementById('result')!;
 const errorEl = document.getElementById('error')!;
 
 // Check current tab on popup open
-chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+browser.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
   const tab = tabs[0];
   if (!tab?.id || !tab.url) {
     showStatus('Open a ChatGPT or Claude conversation first.', 'unsupported');
@@ -43,17 +45,26 @@ scrapeBtn.addEventListener('click', async () => {
   resultEl.style.display = 'none';
 
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error('No active tab');
 
     // Send scrape request to content script
-    const response = await chrome.tabs.sendMessage(tab.id, { type: 'SCRAPE_CONVERSATION' });
+    const response = await browser.tabs.sendMessage(tab.id, { type: 'SCRAPE_CONVERSATION' }) as {
+      success: boolean;
+      error?: string;
+      conversation?: {
+        title: string;
+        messages: Array<unknown>;
+        source: string;
+      };
+    };
 
     if (!response.success) {
       throw new Error(response.error || 'Scraping failed');
     }
 
     const { conversation } = response;
+    if (!conversation) throw new Error('No conversation data returned');
 
     // Show result
     resultEl.innerHTML = `
@@ -87,16 +98,15 @@ scrapeBtn.addEventListener('click', async () => {
       URL.revokeObjectURL(url);
     });
 
-    // Save to chrome.storage (and later backend)
-    document.getElementById('saveBtn')!.addEventListener('click', () => {
-      chrome.runtime.sendMessage(
-        { type: 'SAVE_CONVERSATION', conversation },
-        (resp) => {
-          if (resp?.success) {
-            document.getElementById('saveBtn')!.textContent = '✓ Saved!';
-          }
-        }
-      );
+    // Save to browser.storage (and later backend)
+    document.getElementById('saveBtn')!.addEventListener('click', async () => {
+      const resp = await browser.runtime.sendMessage(
+        { type: 'SAVE_CONVERSATION', conversation }
+      ) as { success?: boolean };
+
+      if (resp?.success) {
+        document.getElementById('saveBtn')!.textContent = '✓ Saved!';
+      }
     });
 
     scrapeBtn.textContent = 'Scrape Again';

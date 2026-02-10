@@ -1,3 +1,5 @@
+import browser from 'webextension-polyfill';
+
 /**
  * Background service worker for the Breadcrumps extension.
  * 
@@ -7,35 +9,33 @@
  * - Sending data to the backend API
  */
 
-chrome.runtime.onInstalled.addListener(() => {
+browser.runtime.onInstalled.addListener(() => {
   console.log('[Breadcrumps] Extension installed');
 });
 
 // Relay messages between popup and content scripts if needed
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+browser.runtime.onMessage.addListener((message: { type: string; conversation?: unknown }) => {
   if (message.type === 'SAVE_CONVERSATION') {
-    // For MVP: store in chrome.storage.local
+    // For MVP: store in browser.storage.local
     // Later: send to backend API
     const { conversation } = message;
     const key = `conv_${Date.now()}`;
 
-    chrome.storage.local.set({ [key]: conversation }, () => {
-      console.log(`[Breadcrumps] Saved conversation: ${conversation.title}`);
-      sendResponse({ success: true, key });
+    return browser.storage.local.set({ [key]: conversation }).then(() => {
+      console.log(`[Breadcrumps] Saved conversation`);
+      return { success: true, key };
     });
-
-    return true;
   }
 
   if (message.type === 'GET_SAVED_CONVERSATIONS') {
-    chrome.storage.local.get(null, (items) => {
+    return browser.storage.local.get(null).then((items) => {
       const conversations = Object.entries(items)
         .filter(([key]) => key.startsWith('conv_'))
         .map(([key, value]) => ({ key, ...value as object }));
 
-      sendResponse({ conversations });
+      return { conversations };
     });
-
-    return true;
   }
+
+  return Promise.resolve();
 });

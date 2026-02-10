@@ -4,17 +4,22 @@
   "private": true,
   "scripts": {
     "dev": "vite build --watch",
+    "dev:firefox": "vite build --watch --config vite.config.firefox.ts",
     "build": "vite build",
-    "clean": "rm -rf dist"
+    "build:firefox": "vite build --config vite.config.firefox.ts",
+    "build:all": "pnpm build && pnpm build:firefox",
+    "clean": "rm -rf dist dist-firefox"
   },
   "dependencies": {
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "webextension-polyfill": "^0.12.0"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.287",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/webextension-polyfill": "^0.12.4",
     "@vitejs/plugin-react": "^4.3.0",
     "typescript": "^5.7.0",
     "vite": "^6.0.0",

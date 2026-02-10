@@ -1,20 +1,5 @@
 import { BaseScraper, $, $$, textOf, type ScrapedConversation, type Message } from './base';
 
-/**
- * Claude Scraper
- * 
- * Targets: https://claude.ai/*
- * 
- * DOM structure (as of early 2026):
- * - Conversation container: div with role-based message groups
- * - User messages: div[data-is-streaming="false"] with "human" turn indicators
- *   Often identifiable by avatar/icon differences or data attributes
- * - Assistant messages: similarly structured with "assistant" indicators
- * - Content: .font-claude-message or prose/markdown containers
- * 
- * Claude's DOM is React-based and uses data attributes extensively.
- * The scraper uses multiple heuristics for resilience.
- */
 export class ClaudeScraper implements BaseScraper {
   source = 'claude' as const;
 
@@ -50,142 +35,298 @@ export class ClaudeScraper implements BaseScraper {
   private extractMessages(): Message[] {
     const messages: Message[] = [];
 
-    // Strategy 1: Look for message containers with role indicators
-    // Claude uses a thread layout where each message group has distinguishing features
-    const messageGroups = $$('[data-testid^="chat-message-"]');
+    // Find user and assistant message elements directly
+    const userMessageEls = $$('[data-testid="user-message"]');
+    const assistantMessageEls = $$('[data-is-streaming]'); // assistant turns have this attr
 
-    if (messageGroups.length > 0) {
-      for (const group of messageGroups) {
-        const testId = group.getAttribute('data-testid') || '';
-        const role = testId.includes('user') ? 'user' : 'assistant';
-
-        const contentEl =
-          group.querySelector('.font-claude-message') ||
-          group.querySelector('.prose') ||
-          group.querySelector('.markdown') ||
-          group;
-
-        const content = this.cleanContent(contentEl);
-        if (!content) continue;
-
-        messages.push({ role, content });
-      }
-
-      if (messages.length > 0) return messages;
+    if (userMessageEls.length === 0 && assistantMessageEls.length === 0) {
+      return this.fallbackExtract();
     }
 
-    // Strategy 2: Alternating message blocks
-    // Claude renders messages in a scrollable thread. User messages typically have
-    // a different background/container than assistant messages.
-    const threadContainer =
-      $('[data-testid="chat-thread"]') ||
-      $('main .overflow-y-auto') ||
-      $('main');
+    // Collect all messages with their DOM elements and roles
+    const allMessages: { el: Element; role: 'user' | 'assistant' }[] = [];
 
-    if (threadContainer) {
-      // Look for direct child divs that represent message turns
-      const turns = Array.from(threadContainer.children).filter(
-        (child) => child.tagName === 'DIV' && child.textContent && child.textContent.trim().length > 0
-      );
-
-      // Heuristic: detect role by checking for user avatar, background color, or structure
-      for (const turn of turns) {
-        const content = this.cleanContent(turn);
-        if (!content || content.length < 2) continue;
-
-        const role = this.detectRole(turn);
-        messages.push({ role, content });
-      }
-
-      if (messages.length > 0) return messages;
+    for (const el of userMessageEls) {
+      allMessages.push({ el, role: 'user' });
     }
 
-    // Strategy 3: Look for .font-claude-message (assistant) and other blocks (user)
-    console.warn('[Breadcrumps] Using fallback scraping strategy for Claude');
-    const allBlocks = $$('.font-claude-message, [data-is-streaming]');
+    for (const el of assistantMessageEls) {
+      // The content container is the .font-claude-response div inside this element
+      const contentEl = el.querySelector('.font-claude-response') || el;
+      allMessages.push({ el: contentEl, role: 'assistant' });
+    }
 
-    for (const block of allBlocks) {
-      const isAssistant =
-        block.classList.contains('font-claude-message') ||
-        block.closest('[data-is-streaming]') !== null;
+    // Sort by DOM order
+    allMessages.sort((a, b) => {
+      const pos = a.el.compareDocumentPosition(b.el);
+      if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+      if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+      return 0;
+    });
 
-      const content = this.cleanContent(block);
-      if (!content) continue;
+    for (const { el, role } of allMessages) {
+      const content =
+        role === 'assistant' ? this.cleanAssistantContent(el) : this.cleanContent(el);
+      if (!content || content.length < 2) continue;
 
-      messages.push({
-        role: isAssistant ? 'assistant' : 'user',
-        content,
-      });
+      // Deduplicate
+      const last = messages[messages.length - 1];
+      if (last && last.role === role && last.content === content) continue;
+
+      messages.push({ role, content });
     }
 
     return messages;
   }
 
   /**
-   * Detect whether a message turn element is from user or assistant.
-   * Uses multiple heuristics since Claude's DOM varies.
+   * Fallback: if the primary strategy fails, try simpler heuristics
    */
-  private detectRole(el: Element): 'user' | 'assistant' {
-    // Check for Claude's font class (assistant messages)
-    if (el.querySelector('.font-claude-message')) return 'assistant';
+  private fallbackExtract(): Message[] {
+    console.warn('[Breadcrumps] Using fallback extraction');
+    const messages: Message[] = [];
 
-    // Check for streaming indicator (assistant)
-    if (el.querySelector('[data-is-streaming]')) return 'assistant';
+    const userEls = $$('[data-testid="user-message"]');
+    // Fixed: font-claude-response, not font-claude-response-body
+    const assistantEls = $$('.font-claude-response');
 
-    // Check for user avatar indicators
-    const hasUserAvatar =
-      el.querySelector('img[alt*="User"]') ||
-      el.querySelector('[data-testid="user-avatar"]');
-    if (hasUserAvatar) return 'user';
+    if (userEls.length === 0 && assistantEls.length === 0) return messages;
 
-    // Check background color heuristic
-    // User messages in Claude often have a slightly different background
-    const style = window.getComputedStyle(el);
-    const bg = style.backgroundColor;
-    // This is fragile but can help as a last resort
+    const all: { el: Element; role: 'user' | 'assistant' }[] = [];
 
-    // Check for code blocks, longer content (more likely assistant)
-    const hasCode = el.querySelector('pre, code');
-    const textLength = (el.textContent || '').length;
-    if (hasCode && textLength > 500) return 'assistant';
-
-    // Default: alternate based on position
-    const parent = el.parentElement;
-    if (parent) {
-      const siblings = Array.from(parent.children);
-      const index = siblings.indexOf(el);
-      return index % 2 === 0 ? 'user' : 'assistant';
+    for (const el of userEls) {
+      all.push({ el, role: 'user' });
+    }
+    for (const el of assistantEls) {
+      all.push({ el, role: 'assistant' });
     }
 
-    return 'user';
+    all.sort((a, b) => {
+      const pos = a.el.compareDocumentPosition(b.el);
+      if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+      if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+      return 0;
+    });
+
+    for (const { el, role } of all) {
+      const content =
+        role === 'assistant' ? this.cleanAssistantContent(el) : this.cleanContent(el);
+      if (!content || content.length < 2) continue;
+
+      const last = messages[messages.length - 1];
+      if (last && last.role === role && last.content === content) continue;
+
+      messages.push({ role, content });
+    }
+
+    return messages;
+  }
+  /**
+   * Clean assistant response content.
+   * Assistant responses contain multiple block elements: p, h2, ol, ul,
+   * code blocks (pre inside divs with copy buttons), etc.
+   */
+  private cleanAssistantContent(container: Element): string {
+    if (!container) return '';
+
+    const parts: string[] = [];
+    const processedElements = new Set<Element>();
+
+    const processNode = (node: Node, depth: number = 0) => {
+      // Prevent infinite recursion
+      if (depth > 50) return;
+
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const el = node as HTMLElement;
+
+        // Skip if already processed
+        if (processedElements.has(el)) return;
+
+        const tag = el.tagName.toLowerCase();
+
+        // Skip UI elements and controls
+        if (tag === 'button') return;
+        if (tag === 'svg') return;
+        if (tag === 'style') return;
+        if (tag === 'script') return;
+        if (el.getAttribute('aria-hidden') === 'true') return;
+        if (el.classList.contains('bg-gradient-to-t')) return;
+
+        // Skip copy button wrappers (but not their code content)
+        if (el.querySelector('button[aria-label*="Copy"]') && !el.querySelector('pre')) return;
+
+        // Handle paragraphs
+        if (tag === 'p') {
+          processedElements.add(el);
+          const text = this.getTextContent(el);
+          if (text.trim()) parts.push(text.trim());
+          return;
+        }
+
+        // Handle headings
+        if (tag === 'h1' || tag === 'h2' || tag === 'h3' || tag === 'h4' || tag === 'h5' || tag === 'h6') {
+          processedElements.add(el);
+          const text = this.getTextContent(el);
+          if (text.trim()) parts.push(`\n## ${text.trim()}`);
+          return;
+        }
+
+        // Handle ordered lists
+        if (tag === 'ol') {
+          processedElements.add(el);
+          const items = el.querySelectorAll(':scope > li');
+          if (items.length > 0) {
+            items.forEach((li, i) => {
+              processedElements.add(li);
+              const text = this.getTextContent(li);
+              if (text.trim()) parts.push(`${i + 1}. ${text.trim()}`);
+            });
+            return;
+          }
+        }
+
+        // Handle unordered lists
+        if (tag === 'ul') {
+          processedElements.add(el);
+          const items = el.querySelectorAll(':scope > li');
+          if (items.length > 0) {
+            items.forEach((li) => {
+              processedElements.add(li);
+              const text = this.getTextContent(li);
+              if (text.trim()) parts.push(`- ${text.trim()}`);
+            });
+            return;
+          }
+        }
+
+        // Handle code blocks: pre or pre>code
+        if (tag === 'pre') {
+          processedElements.add(el);
+          const codeEl = el.querySelector('code') || el;
+          const code = codeEl.textContent || '';
+          if (code.trim()) {
+            parts.push('```\n' + code.trim() + '\n```');
+          }
+          return;
+        }
+
+        // Handle code blocks wrapped in divs
+        if (tag === 'div' && el.querySelector('pre')) {
+          processedElements.add(el);
+          const preEl = el.querySelector('pre');
+          if (preEl) {
+            const codeEl = preEl.querySelector('code') || preEl;
+            const code = codeEl.textContent || '';
+            if (code.trim()) {
+              parts.push('```\n' + code.trim() + '\n```');
+            }
+          }
+          return;
+        }
+
+        // Handle blockquotes
+        if (tag === 'blockquote') {
+          processedElements.add(el);
+          const text = this.getTextContent(el);
+          if (text.trim()) {
+            parts.push('> ' + text.trim().replace(/\n/g, '\n> '));
+          }
+          return;
+        }
+
+        // For containers, recurse into children
+        el.childNodes.forEach((child) => processNode(child, depth + 1));
+
+      } else if (node.nodeType === Node.TEXT_NODE) {
+        // Only capture direct text nodes that aren't empty
+        const text = (node.textContent || '').trim();
+        if (text && text.length > 0) {
+          // Check if this text node is not inside any processed element
+          const parent = node.parentElement;
+          if (parent && !processedElements.has(parent)) {
+            parts.push(text);
+          }
+        }
+      }
+    };
+
+    container.childNodes.forEach((child) => processNode(child, 0));
+
+    return parts
+      .join('\n\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  /**
+   * Get text content from an element, handling inline code
+   */
+  private getTextContent(el: Element): string {
+    let text = '';
+
+    const walk = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        text += node.textContent || '';
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        const element = node as HTMLElement;
+        const tag = element.tagName.toLowerCase();
+
+        if (tag === 'button' || tag === 'svg') return;
+
+        if (tag === 'code') {
+          // Inline code (not inside pre)
+          if (element.parentElement?.tagName.toLowerCase() !== 'pre') {
+            text += '`' + (element.textContent || '') + '`';
+          } else {
+            text += element.textContent || '';
+          }
+        } else if (tag === 'strong' || tag === 'b') {
+          text += '**';
+          element.childNodes.forEach(walk);
+          text += '**';
+        } else if (tag === 'em' || tag === 'i') {
+          text += '*';
+          element.childNodes.forEach(walk);
+          text += '*';
+        } else if (tag === 'br') {
+          text += '\n';
+        } else {
+          element.childNodes.forEach(walk);
+        }
+      }
+    };
+
+    el.childNodes.forEach(walk);
+    return text;
+  }
+
+  /**
+   * Clean user message content
+   */
+  private cleanContent(el: Element | null): string {
+    if (!el) return '';
+    return this.getTextContent(el)
+      .replace(/\n{3,}/g, '\n\n')
+      .replace(/[ \t]+/g, ' ')
+      .trim();
   }
 
   private extractTitle(): string {
-    // Claude page title format: "conversation title - Claude"
     const pageTitle = document.title?.replace(/\s*[-–]\s*Claude\s*$/, '').trim();
     if (pageTitle && pageTitle.length > 0 && pageTitle !== 'Claude') {
       return pageTitle;
     }
 
-    // Try sidebar active item
-    const activeChat = $('a[aria-current="page"]') || $('nav .bg-accent');
+    const activeChat = $('a[aria-current="page"]');
     if (activeChat) {
       const text = textOf(activeChat);
       if (text) return text;
-    }
-
-    // Fallback: first message content
-    const firstBlock = $('[data-testid^="chat-message-"]');
-    if (firstBlock) {
-      const text = textOf(firstBlock);
-      return text.substring(0, 80) + (text.length > 80 ? '...' : '');
     }
 
     return 'Untitled Claude Conversation';
   }
 
   private detectModel(): string | undefined {
-    // Look for model selector or indicator
     const modelEl = $('[data-testid="model-selector"]') || $('button[aria-label*="Model"]');
     if (modelEl) {
       const text = textOf(modelEl).toLowerCase();
@@ -194,37 +335,5 @@ export class ClaudeScraper implements BaseScraper {
       if (text.includes('haiku')) return 'claude-haiku';
     }
     return undefined;
-  }
-
-  private cleanContent(el: Element | null): string {
-    if (!el) return '';
-
-    let text = '';
-
-    const walk = (node: Node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        text += node.textContent;
-      } else if (node.nodeType === Node.ELEMENT_NODE) {
-        const tag = (node as Element).tagName.toLowerCase();
-
-        if (tag === 'pre' || tag === 'code') {
-          text += '\n```\n' + (node as Element).textContent + '\n```\n';
-        } else if (tag === 'br') {
-          text += '\n';
-        } else if (tag === 'p' || tag === 'div' || tag === 'li') {
-          text += '\n';
-          node.childNodes.forEach(walk);
-          text += '\n';
-        } else {
-          node.childNodes.forEach(walk);
-        }
-      }
-    };
-
-    el.childNodes.forEach(walk);
-
-    return text
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
   }
 }
