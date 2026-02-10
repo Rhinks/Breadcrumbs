@@ -64,4 +64,3 @@ pnpm build
 
 ---
 
-**Built for:** Hackathon 2026 | **Team:** 2 engineers
