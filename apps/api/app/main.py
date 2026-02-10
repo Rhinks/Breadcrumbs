@@ -19,15 +19,11 @@ app = FastAPI(
     description="AI conversation workspace backend",
 )
 
-# CORS — allow Next.js frontend and Chrome extension
+# CORS — allow everything in dev (extension, frontend, etc.)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",       # Next.js dev
-        "chrome-extension://*",         # Chrome extension
-        settings.frontend_url,
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,  # Must be False when using allow_origins=["*"]
     allow_methods=["*"],
     allow_headers=["*"],
 )

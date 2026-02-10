@@ -19,9 +19,9 @@ export class ClaudeScraper implements BaseScraper {
       return {
         title: this.extractTitle(),
         source: 'claude',
-        sourceUrl: window.location.href,
+        source_url: window.location.href,
         messages,
-        scrapedAt: new Date().toISOString(),
+        scraped_at: new Date().toISOString(),
         metadata: {
           model: this.detectModel(),
         },

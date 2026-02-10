@@ -35,9 +35,9 @@ export class ChatGPTScraper implements BaseScraper {
       return {
         title: this.extractTitle(),
         source: 'chatgpt',
-        sourceUrl: window.location.href,
+        source_url: window.location.href,
         messages,
-        scrapedAt: new Date().toISOString(),
+        scraped_at: new Date().toISOString(),
         metadata: {
           model: this.detectModel(),
         },

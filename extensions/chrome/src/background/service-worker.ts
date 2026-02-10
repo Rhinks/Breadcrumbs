@@ -1,40 +1,42 @@
 import browser from 'webextension-polyfill';
 
-/**
- * Background service worker for the Breadcrumps extension.
- * 
- * Handles:
- * - Communication between popup and content scripts
- * - Storing scraped data temporarily
- * - Sending data to the backend API
- */
+const API_URL = 'http://localhost:8000';
 
 browser.runtime.onInstalled.addListener(() => {
   console.log('[Breadcrumps] Extension installed');
 });
 
-// Relay messages between popup and content scripts if needed
-browser.runtime.onMessage.addListener((message: { type: string; conversation?: unknown }) => {
-  if (message.type === 'SAVE_CONVERSATION') {
-    // For MVP: store in browser.storage.local
-    // Later: send to backend API
-    const { conversation } = message;
-    const key = `conv_${Date.now()}`;
+browser.runtime.onMessage.addListener((message: unknown) => {
+  const msg = message as { type: string; conversation?: any };
 
-    return browser.storage.local.set({ [key]: conversation }).then(() => {
-      console.log(`[Breadcrumps] Saved conversation`);
-      return { success: true, key };
-    });
-  }
+  if (msg.type === 'SAVE_CONVERSATION') {
+    const { conversation } = msg;
 
-  if (message.type === 'GET_SAVED_CONVERSATIONS') {
-    return browser.storage.local.get(null).then((items) => {
-      const conversations = Object.entries(items)
-        .filter(([key]) => key.startsWith('conv_'))
-        .map(([key, value]) => ({ key, ...value as object }));
-
-      return { conversations };
-    });
+    // Send scraped conversation to FastAPI backend
+    return fetch(`${API_URL}/api/conversations/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: conversation.title,
+        source: conversation.source,
+        source_url: conversation.source_url,
+        messages: conversation.messages,
+        scraped_at: conversation.scraped_at,
+        metadata: conversation.metadata || {},
+      }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        return res.json();
+      })
+      .then((data) => {
+        console.log('[Breadcrumps] Saved to backend:', data.id);
+        return { success: true, id: data.id };
+      })
+      .catch((err) => {
+        console.error('[Breadcrumps] Save failed:', err);
+        return { success: false, error: err.message };
+      });
   }
 
   return Promise.resolve();
